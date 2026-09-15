@@ -12,7 +12,9 @@ import {
   Stack,
   Tooltip,
   useTheme,
+  alpha,
 } from '@mui/material'
+import CheckRoundedIcon from '@mui/icons-material/CheckRounded'
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded'
 import PlayArrowRoundedIcon from '@mui/icons-material/PlayArrowRounded'
 import StopRoundedIcon from '@mui/icons-material/StopRounded'
@@ -27,15 +29,29 @@ import {
   type ThemeMode,
   type RingtoneId,
 } from '../types'
+import TuneRoundedIcon from '@mui/icons-material/TuneRounded'
 import { RINGTONES } from '../audio/ringtones'
 import { getAccentColor } from '../theme/palette'
+import {
+  CUSTOM_TEMPLATE_ID,
+  TEMPLATES,
+  matchTemplate,
+  type Template,
+} from '../templates'
 import AccentColorPicker from './AccentColorPicker'
 import NumberStepper from './NumberStepper'
+import TemplateCard from './TemplateCard'
+
+// A tighter corner radius for the interactive "option" controls so they read
+// as crisp rows rather than pill-like blobs.
+const OPTION_RADIUS = '8px'
 
 interface SettingsPanelProps {
   settings: Settings
   onUpdate: <K extends keyof Settings>(key: K, value: Settings[K]) => void
   onReset: () => void
+  onApplyTemplate: (template: Template) => void
+  onSelectCustom: () => void
   onClose: () => void
   onPreview: (ringtone: RingtoneId) => void
   onStopPreview: () => void
@@ -59,10 +75,103 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
   )
 }
 
+interface OptionRowProps {
+  active?: boolean
+  onSelect: () => void
+  title: string
+  subtitle: string
+  ariaLabel: string
+  icon?: React.ReactNode
+}
+
+/** A selectable settings row with a crisp (not pill-like) corner radius. */
+function OptionRow({
+  active = false,
+  onSelect,
+  title,
+  subtitle,
+  ariaLabel,
+  icon,
+}: OptionRowProps) {
+  const theme = useTheme()
+  return (
+    <Box
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          onSelect()
+        }
+      }}
+      aria-pressed={active}
+      aria-label={ariaLabel}
+      sx={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 1.25,
+        px: 1.5,
+        py: 1.1,
+        borderRadius: OPTION_RADIUS,
+        border: 1,
+        cursor: 'pointer',
+        borderColor: active ? 'primary.main' : 'divider',
+        bgcolor: active
+          ? alpha(theme.palette.primary.main, 0.08)
+          : 'transparent',
+        transition: 'border-color 0.2s, background-color 0.2s',
+        '&:hover': {
+          borderColor: 'primary.main',
+          bgcolor: alpha(theme.palette.primary.main, 0.04),
+        },
+      }}
+    >
+      {icon && (
+        <Box
+          sx={{
+            flexShrink: 0,
+            display: 'grid',
+            placeItems: 'center',
+            width: 30,
+            height: 30,
+            borderRadius: '6px',
+            color: active ? 'primary.main' : 'text.secondary',
+            bgcolor: active
+              ? alpha(theme.palette.primary.main, 0.14)
+              : 'action.hover',
+          }}
+        >
+          {icon}
+        </Box>
+      )}
+      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+        <Typography
+          variant="body2"
+          sx={{ fontWeight: 600, color: 'text.primary', lineHeight: 1.2 }}
+        >
+          {title}
+        </Typography>
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {subtitle}
+        </Typography>
+      </Box>
+      {active && (
+        <CheckRoundedIcon
+          fontSize="small"
+          sx={{ color: 'primary.main', flexShrink: 0 }}
+        />
+      )}
+    </Box>
+  )
+}
+
 export default function SettingsPanel({
   settings,
   onUpdate,
   onReset,
+  onApplyTemplate,
+  onSelectCustom,
   onClose,
   onPreview,
   onStopPreview,
@@ -72,13 +181,21 @@ export default function SettingsPanel({
   const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const accent = getAccentColor(settings.accentColor)
   const swatch = theme.palette.mode === 'dark' ? accent.darkMain : accent.main
+  // The template whose durations currently match the settings, if any.
+  const activeTemplate = matchTemplate(settings)
+  // Treat the format as custom when the user explicitly chose Custom or when
+  // the durations don't line up with any template. The duration form (below)
+  // is only revealed in this state.
+  const isCustom =
+    settings.templateId === CUSTOM_TEMPLATE_ID || !activeTemplate
 
   return (
     <Box
       sx={{
         height: '100%',
         overflowY: 'auto',
-        p: 3,
+        px: { xs: 3, sm: 4 },
+        py: { xs: 3, sm: 3.5 },
       }}
     >
       <Box
@@ -86,7 +203,7 @@ export default function SettingsPanel({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          mb: 2,
+          mb: 3,
         }}
       >
         <Typography variant="h5">Settings</Typography>
@@ -95,43 +212,78 @@ export default function SettingsPanel({
         </IconButton>
       </Box>
 
-      {/* Durations */}
-      <SectionLabel>Timer Durations</SectionLabel>
-      <Stack spacing={1.5} sx={{ mb: 3 }}>
-        <NumberStepper
-          label="Pomodoro"
-          value={settings.pomodoroDuration}
-          min={DURATION_LIMITS.min}
-          max={DURATION_LIMITS.max}
-          suffix="min"
-          onChange={(v) => onUpdate('pomodoroDuration', v)}
-        />
-        <NumberStepper
-          label="Short break"
-          value={settings.shortBreakDuration}
-          min={DURATION_LIMITS.min}
-          max={DURATION_LIMITS.max}
-          suffix="min"
-          onChange={(v) => onUpdate('shortBreakDuration', v)}
-        />
-        <NumberStepper
-          label="Long break"
-          value={settings.longBreakDuration}
-          min={DURATION_LIMITS.min}
-          max={DURATION_LIMITS.max}
-          suffix="min"
-          onChange={(v) => onUpdate('longBreakDuration', v)}
-        />
-        <NumberStepper
-          label="Pomodoros before long break"
-          value={settings.pomodorosBeforeLongBreak}
-          min={DURATION_LIMITS.poolMin}
-          max={DURATION_LIMITS.poolMax}
-          onChange={(v) => onUpdate('pomodorosBeforeLongBreak', v)}
+      {/* Format templates — same rich cards as the first-run setup screen. */}
+      <SectionLabel>Format</SectionLabel>
+      <Stack spacing={1} sx={{ mb: isCustom ? 2 : 3 }}>
+        {TEMPLATES.map((t) => {
+          const active = !isCustom && activeTemplate?.id === t.id
+          return (
+            <TemplateCard
+              key={t.id}
+              template={t}
+              active={active}
+              onSelect={onApplyTemplate}
+              trailing={
+                active ? (
+                  <CheckRoundedIcon
+                    fontSize="small"
+                    sx={{ color: 'primary.main' }}
+                  />
+                ) : undefined
+              }
+            />
+          )
+        })}
+
+        {/* Custom row — selecting it reveals the duration form below. */}
+        <OptionRow
+          active={isCustom}
+          onSelect={onSelectCustom}
+          ariaLabel="Custom format — set your own durations"
+          title="Custom"
+          subtitle="Set your own durations"
+          icon={<TuneRoundedIcon fontSize="small" />}
         />
       </Stack>
 
-      <Divider sx={{ my: 2 }} />
+      {/* Duration form: only shown for the custom format. */}
+      {isCustom && (
+        <Stack spacing={1.5} sx={{ mb: 3 }}>
+          <NumberStepper
+            label="Pomodoro"
+            value={settings.pomodoroDuration}
+            min={DURATION_LIMITS.min}
+            max={DURATION_LIMITS.max}
+            suffix="min"
+            onChange={(v) => onUpdate('pomodoroDuration', v)}
+          />
+          <NumberStepper
+            label="Short break"
+            value={settings.shortBreakDuration}
+            min={DURATION_LIMITS.min}
+            max={DURATION_LIMITS.max}
+            suffix="min"
+            onChange={(v) => onUpdate('shortBreakDuration', v)}
+          />
+          <NumberStepper
+            label="Long break"
+            value={settings.longBreakDuration}
+            min={DURATION_LIMITS.min}
+            max={DURATION_LIMITS.max}
+            suffix="min"
+            onChange={(v) => onUpdate('longBreakDuration', v)}
+          />
+          <NumberStepper
+            label="Pomodoros before long break"
+            value={settings.pomodorosBeforeLongBreak}
+            min={DURATION_LIMITS.poolMin}
+            max={DURATION_LIMITS.poolMax}
+            onChange={(v) => onUpdate('pomodorosBeforeLongBreak', v)}
+          />
+        </Stack>
+      )}
+
+      <Divider sx={{ my: 3 }} />
 
       {/* Sound */}
       <SectionLabel>Sound</SectionLabel>
@@ -141,8 +293,15 @@ export default function SettingsPanel({
           size="small"
           label="Ringtone"
           value={settings.ringtone}
-          onChange={(e) => onUpdate('ringtone', e.target.value as RingtoneId)}
+          onChange={(e) => {
+            const next = e.target.value as RingtoneId
+            onUpdate('ringtone', next)
+            // If a preview is already playing, immediately switch to the newly
+            // selected tone so the user hears their choice right away.
+            if (isPreviewing) onPreview(next)
+          }}
           fullWidth
+          sx={{ '& .MuiOutlinedInput-root': { borderRadius: OPTION_RADIUS } }}
         >
           {RINGTONES.map((r) => (
             <MenuItem key={r.id} value={r.id}>
@@ -160,7 +319,7 @@ export default function SettingsPanel({
             onClick={() =>
               isPreviewing ? onStopPreview() : onPreview(settings.ringtone)
             }
-            sx={{ color: 'text.secondary', borderColor: 'divider' }}
+            sx={{ color: 'text.secondary', borderColor: 'divider', borderRadius: OPTION_RADIUS }}
           >
             {isPreviewing ? 'Stop' : 'Preview'}
           </Button>
@@ -189,7 +348,7 @@ export default function SettingsPanel({
         />
       </Stack>
 
-      <Divider sx={{ my: 2 }} />
+      <Divider sx={{ my: 3 }} />
 
       {/* Behavior */}
       <SectionLabel>Behavior</SectionLabel>
@@ -210,7 +369,7 @@ export default function SettingsPanel({
         </Typography>
       </Box>
 
-      <Divider sx={{ my: 2 }} />
+      <Divider sx={{ my: 3 }} />
 
       {/* Appearance */}
       <SectionLabel>Appearance</SectionLabel>
@@ -222,6 +381,7 @@ export default function SettingsPanel({
           value={settings.themeMode}
           onChange={(e) => onUpdate('themeMode', e.target.value as ThemeMode)}
           fullWidth
+          sx={{ '& .MuiOutlinedInput-root': { borderRadius: OPTION_RADIUS } }}
         >
           <MenuItem value="light">
             <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
@@ -256,7 +416,7 @@ export default function SettingsPanel({
               variant="outlined"
               color="inherit"
               size="small"
-              sx={{ color: 'text.primary', borderColor: 'divider', gap: 1 }}
+              sx={{ color: 'text.primary', borderColor: 'divider', gap: 1, borderRadius: OPTION_RADIUS }}
               aria-label={`Accent color: ${accent.name}. Click to change.`}
             >
               <Box
@@ -273,18 +433,20 @@ export default function SettingsPanel({
         </Box>
       </Stack>
 
-      <Divider sx={{ my: 2 }} />
+      <Divider sx={{ my: 3 }} />
 
       {/* Data */}
       <SectionLabel>Data</SectionLabel>
-      <Button
-        variant="outlined"
-        color="inherit"
-        onClick={onReset}
-        sx={{ color: 'text.secondary', borderColor: 'divider' }}
-      >
-        Reset to defaults
-      </Button>
+      <Box sx={{ mb: 1 }}>
+        <Button
+          variant="outlined"
+          color="inherit"
+          onClick={onReset}
+          sx={{ color: 'text.secondary', borderColor: 'divider', borderRadius: OPTION_RADIUS }}
+        >
+          Reset to defaults
+        </Button>
+      </Box>
 
       <AccentColorPicker
         open={colorPickerOpen}

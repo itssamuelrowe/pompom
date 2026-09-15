@@ -21,7 +21,10 @@ import TimerDial from './components/TimerDial'
 import Controls from './components/Controls'
 import SessionIndicator from './components/SessionIndicator'
 import SettingsPanel from './components/SettingsPanel'
+import SetupScreen from './components/SetupScreen'
+import TemplateSummary from './components/TemplateSummary'
 import { formatTime } from './utils'
+import type { Template } from './templates'
 import type { RingtoneId, TimerMode } from './types'
 
 const STATUS_LABELS: Record<string, string> = {
@@ -39,19 +42,25 @@ const BREAK_STATUS: Record<string, string> = {
 }
 
 function App() {
-  const { settings, update, reset } = useSettings()
+  const { settings, update, reset, applyTemplate, applyCustom, hasChosenTemplate } =
+    useSettings()
   const mode = useResolvedMode(settings.themeMode)
   const theme = useMemo(
     () => createAppTheme(mode, settings.accentColor),
     [mode, settings.accentColor],
   )
   const isDesktop = useMediaQuery(theme.breakpoints.up('md'))
+  // The side-by-side (dial | controls) layout is used only in the lg range;
+  // xl and up revert to the roomy centered column.
+  const isSideBySide = useMediaQuery(theme.breakpoints.between('lg', 'xl'))
 
   const [currentMode, setCurrentMode] = useState<TimerMode>('pomodoro')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [completedPomodoros, setCompletedPomodoros] = useState(0)
   const [isPreviewing, setIsPreviewing] = useState(false)
   const [audioBlocked, setAudioBlocked] = useState(false)
+
+  const isBreak = currentMode !== 'pomodoro'
 
   const durationFor = useCallback(
     (m: TimerMode): number => {
@@ -142,6 +151,14 @@ function App() {
     resetTo(durationFor(m))
   }
 
+  const handleSelectTemplate = (template: Template) => {
+    applyTemplate(template)
+    // Reset the running view to the newly chosen pomodoro length.
+    pendingModeRef.current = null
+    setCurrentMode('pomodoro')
+    resetTo(template.pomodoroDuration * 60)
+  }
+
   const handleStart = () => {
     // Starting counts as a user gesture -> initialize audio for later playback.
     audioManager.init()
@@ -219,43 +236,135 @@ function App() {
   const sessionNumber =
     currentMode === 'pomodoro' ? inCycle + 1 : filledDots
 
-  const timerContent = (
+  const dial = (
+    <TimerDial
+      progress={progress}
+      timeLabel={formatTime(remaining)}
+      statusLabel={statusLabel}
+      isBreak={isBreak}
+    />
+  )
+
+  const controls = (
+    <Controls
+      status={status}
+      onStart={handleStart}
+      onPause={handlePause}
+      onReset={handleReset}
+      onSkip={handleSkip}
+      onStopRinging={handleStopRinging}
+    />
+  )
+
+  const sessionDots = (
+    <SessionIndicator label={sessionNumber} filled={filledDots} total={pool} />
+  )
+
+  const modeTabs = <ModeTabs mode={currentMode} onChange={handleModeChange} />
+  const summary = <TemplateSummary settings={settings} />
+
+  const timerContent = isSideBySide ? (
+    // lg only: tabs as a clean header on top, then a centered row of
+    // [dial | side panel]. The side panel groups the format summary with the
+    // controls and session dots so the right column feels balanced and the
+    // top isn't a cramped two-tier block.
+    <Box
+      sx={{
+        px: 4,
+        py: 3,
+        width: '100%',
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 'clamp(32px, 8vh, 72px)',
+      }}
+    >
+      <Box sx={{ flexShrink: 0 }}>{modeTabs}</Box>
+
+      <Box
+        sx={{
+          minHeight: 0,
+          display: 'flex',
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: { lg: 7 },
+        }}
+      >
+        {/* Dial: fits the available row height, capped at its design size. */}
+        <Box
+          sx={{
+            height: 'min(44vh, 340px)',
+            aspectRatio: '1 / 1',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            containerType: 'size',
+            flexShrink: 0,
+          }}
+        >
+          <TimerDial
+            progress={progress}
+            timeLabel={formatTime(remaining)}
+            statusLabel={statusLabel}
+            isBreak={isBreak}
+            fitContainer
+          />
+        </Box>
+
+        {/* Side panel: format summary + controls + session dots. */}
+        <Stack
+          spacing={2.5}
+          sx={{ flexShrink: 0, alignItems: 'center', width: 320 }}
+        >
+          {summary}
+          {controls}
+          {sessionDots}
+        </Stack>
+      </Box>
+    </Box>
+  ) : (
+    // Small screens: single centered column.
     <Stack
-      spacing={4}
       sx={{
         px: { xs: 2, sm: 4 },
-        py: { xs: 3, sm: 4 },
-        flex: { xs: 1, md: 'unset' },
+        flexShrink: 0,
         width: '100%',
         maxWidth: 520,
         mx: 'auto',
         alignItems: 'center',
       }}
     >
-      <ModeTabs mode={currentMode} onChange={handleModeChange} />
-      <TimerDial
-        progress={progress}
-        timeLabel={formatTime(remaining)}
-        statusLabel={statusLabel}
-      />
-      <Controls
-        status={status}
-        onStart={handleStart}
-        onPause={handlePause}
-        onReset={handleReset}
-        onSkip={handleSkip}
-        onStopRinging={handleStopRinging}
-      />
-      <SessionIndicator label={sessionNumber} filled={filledDots} total={pool} />
+      <Stack spacing={1.5} sx={{ width: '100%', alignItems: 'center' }}>
+        {modeTabs}
+        {summary}
+      </Stack>
+      <Box sx={{ my: 'clamp(16px, 4vh, 40px)' }}>{dial}</Box>
+      <Stack spacing={{ xs: 2, sm: 3 }} sx={{ width: '100%', alignItems: 'center' }}>
+        {controls}
+        {sessionDots}
+      </Stack>
     </Stack>
   )
+
+  if (!hasChosenTemplate) {
+    return (
+      <ThemeProvider theme={theme}>
+        <CssBaseline />
+        <SetupScreen onSelect={handleSelectTemplate} onCustom={applyCustom} />
+      </ThemeProvider>
+    )
+  }
 
   return (
     <ThemeProvider theme={theme}>
       <CssBaseline />
       <Box
         sx={{
-          minHeight: '100svh',
+          height: '100svh',
+          overflow: 'hidden',
           bgcolor: 'background.default',
           display: 'flex',
           flexDirection: 'column',
@@ -266,16 +375,21 @@ function App() {
           onToggleSettings={() => setSettingsOpen((o) => !o)}
         />
 
+        {/* Content area fills the remaining height and centers the timer. The
+            dial scales to the viewport (see TimerDial) so everything fits
+            without scrolling. */}
         <Box
           sx={{
             flex: 1,
+            minHeight: 0,
             display: 'flex',
+            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
             maxWidth: 1200,
             width: '100%',
             mx: 'auto',
-            py: { xs: 2, md: 6 },
+            py: { xs: 1.5, md: 3 },
           }}
         >
           {timerContent}
@@ -288,8 +402,8 @@ function App() {
           slotProps={{
             paper: {
               sx: {
-                width: isDesktop ? 440 : '100%',
-                maxWidth: '100%',
+                width: isDesktop ? 520 : '100%',
+                maxWidth: isDesktop ? '92vw' : '100%',
                 height: isDesktop ? '100%' : 'auto',
                 maxHeight: isDesktop ? '100%' : '88svh',
                 borderTopLeftRadius: isDesktop ? 0 : 20,
@@ -318,6 +432,8 @@ function App() {
             settings={settings}
             onUpdate={update}
             onReset={reset}
+            onApplyTemplate={handleSelectTemplate}
+            onSelectCustom={() => applyCustom()}
             onClose={() => setSettingsOpen(false)}
             onPreview={handlePreview}
             onStopPreview={handleStopPreview}

@@ -8,6 +8,12 @@ import {
 } from '../types'
 import { ACCENT_COLORS } from '../theme/palette'
 import { RINGTONES } from '../audio/ringtones'
+import {
+  CUSTOM_TEMPLATE_ID,
+  isChosenTemplateId,
+  type Template,
+  templateToSettings,
+} from '../templates'
 
 const STORAGE_KEY = 'pompom.settings.v1'
 
@@ -80,6 +86,10 @@ function sanitize(raw: unknown): Settings {
       typeof r.volume === 'number' && r.volume >= 0 && r.volume <= 1
         ? r.volume
         : DEFAULT_SETTINGS.volume,
+    templateId:
+      typeof r.templateId === 'string' && isChosenTemplateId(r.templateId)
+        ? r.templateId
+        : DEFAULT_SETTINGS.templateId,
   }
 }
 
@@ -114,5 +124,50 @@ export function useSettings() {
     setSettings({ ...DEFAULT_SETTINGS })
   }, [])
 
-  return { settings, update, reset }
+  /** Apply a template's durations and remember which one was picked. */
+  const applyTemplate = useCallback((template: Template) => {
+    setSettings((prev) => ({
+      ...prev,
+      ...templateToSettings(template),
+      templateId: template.id,
+    }))
+  }, [])
+
+  /**
+   * Complete first-run setup with a custom format, marking the choice as
+   * "custom" so the user can keep tuning everything themselves. Any provided
+   * duration fields are applied; omitted ones keep their current value.
+   */
+  const applyCustom = useCallback(
+    (
+      durations?: Partial<
+        Pick<
+          Settings,
+          | 'pomodoroDuration'
+          | 'shortBreakDuration'
+          | 'longBreakDuration'
+          | 'pomodorosBeforeLongBreak'
+        >
+      >,
+    ) => {
+      setSettings((prev) => ({
+        ...prev,
+        ...durations,
+        templateId: CUSTOM_TEMPLATE_ID,
+      }))
+    },
+    [],
+  )
+
+  // A first-time visitor has not picked a template yet.
+  const hasChosenTemplate = isChosenTemplateId(settings.templateId)
+
+  return {
+    settings,
+    update,
+    reset,
+    applyTemplate,
+    applyCustom,
+    hasChosenTemplate,
+  }
 }

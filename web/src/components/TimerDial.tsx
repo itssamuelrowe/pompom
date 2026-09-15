@@ -1,10 +1,20 @@
-import { Box, Typography, useTheme, alpha } from '@mui/material'
+import { Box, Chip, Typography, useTheme, alpha } from '@mui/material'
+import type { SxProps, Theme } from '@mui/material/styles'
+import LocalCafeRoundedIcon from '@mui/icons-material/LocalCafeRounded'
 
 interface TimerDialProps {
   /** 0 to 1, fraction of time remaining */
   progress: number
   timeLabel: string
   statusLabel: string
+  /** When true, the dial adopts a softer "resting" treatment for breaks. */
+  isBreak?: boolean
+  /**
+   * When true, the dial sizes to its parent (which must be a `size` container)
+   * instead of the viewport — used in the side-by-side desktop layout.
+   */
+  fitContainer?: boolean
+  sx?: SxProps<Theme>
 }
 
 const SIZE = 300
@@ -17,6 +27,9 @@ export default function TimerDial({
   progress,
   timeLabel,
   statusLabel,
+  isBreak = false,
+  fitContainer = false,
+  sx,
 }: TimerDialProps) {
   const theme = useTheme()
   const main = theme.palette.primary.main
@@ -28,15 +41,25 @@ export default function TimerDial({
 
   return (
     <Box
-      sx={{
-        position: 'relative',
-        width: SIZE,
-        maxWidth: '82vw',
-        aspectRatio: '1 / 1',
-        display: 'grid',
-        placeItems: 'center',
-        mx: 'auto',
-      }}
+      sx={[
+        {
+          position: 'relative',
+          // Scale with the smaller of the available width/height so the whole
+          // layout fits without scrolling, capped at the design size.
+          // `fitContainer` sizes to the parent size-container (desktop
+          // side-by-side); otherwise it sizes to the viewport (stacked).
+          width: fitContainer
+            ? `min(${SIZE}px, 100cqw, 100cqh)`
+            : `min(${SIZE}px, 82vw, 46vh)`,
+          aspectRatio: '1 / 1',
+          display: 'grid',
+          placeItems: 'center',
+          mx: 'auto',
+          // Establish a container so inner text can scale to the dial size.
+          containerType: 'inline-size',
+        },
+        ...(Array.isArray(sx) ? sx : [sx]),
+      ]}
       role="timer"
       aria-live="polite"
       aria-label={`${statusLabel}, ${timeLabel} remaining`}
@@ -59,7 +82,8 @@ export default function TimerDial({
           </linearGradient>
         </defs>
 
-        {/* Background track */}
+        {/* Background track. On breaks it becomes a dotted "resting" ring to
+            subtly signal a break without recoloring the whole screen. */}
         <circle
           cx={CENTER}
           cy={CENTER}
@@ -67,6 +91,8 @@ export default function TimerDial({
           fill="none"
           stroke={track}
           strokeWidth={STROKE}
+          strokeLinecap={isBreak ? 'round' : 'butt'}
+          strokeDasharray={isBreak ? '1 14' : undefined}
         />
 
         {/* Progress arc */}
@@ -85,10 +111,25 @@ export default function TimerDial({
       </Box>
 
       <Box sx={{ textAlign: 'center', px: 2 }}>
+        {isBreak && (
+          <Chip
+            icon={<LocalCafeRoundedIcon />}
+            label="Break time"
+            size="small"
+            sx={{
+              mb: 1.5,
+              fontWeight: 600,
+              color: 'primary.main',
+              bgcolor: alpha(main, isDark ? 0.2 : 0.12),
+              '& .MuiChip-icon': { color: 'primary.main' },
+            }}
+          />
+        )}
         <Typography
           variant="h1"
           sx={{
-            fontSize: { xs: 54, sm: 66 },
+            // Scale with the dial (container width) so it fits at any size.
+            fontSize: 'clamp(2rem, 22cqw, 4.125rem)',
             lineHeight: 1,
             fontVariantNumeric: 'tabular-nums',
             letterSpacing: '-0.02em',
@@ -99,7 +140,12 @@ export default function TimerDial({
         </Typography>
         <Typography
           variant="body1"
-          sx={{ color: 'text.secondary', mt: 1, fontWeight: 500 }}
+          sx={{
+            color: 'text.secondary',
+            mt: 1,
+            fontWeight: 500,
+            fontSize: 'clamp(0.8rem, 5cqw, 1rem)',
+          }}
         >
           {statusLabel}
         </Typography>

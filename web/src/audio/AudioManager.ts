@@ -1,5 +1,5 @@
 import type { RingtoneId } from '../types'
-import { RINGTONE_PATTERNS } from './ringtones'
+import { RINGTONE_PATTERNS, resolveRingtone } from './ringtones'
 
 type StateListener = (playing: boolean, blocked: boolean) => void
 
@@ -11,6 +11,7 @@ type StateListener = (playing: boolean, blocked: boolean) => void
 export class AudioManager {
   private ctx: AudioContext | null = null
   private masterGain: GainNode | null = null
+  private limiter: DynamicsCompressorNode | null = null
   private loopTimer: number | null = null
   private scheduledNodes: AudioScheduledSourceNode[] = []
   private playing = false
@@ -42,7 +43,16 @@ export class AudioManager {
       this.ctx = new Ctor()
       this.masterGain = this.ctx.createGain()
       this.masterGain.gain.value = this.volume
-      this.masterGain.connect(this.ctx.destination)
+      // A limiter tames peaks so tones can be driven harder (louder) without
+      // harsh clipping when several oscillators overlap.
+      this.limiter = this.ctx.createDynamicsCompressor()
+      this.limiter.threshold.value = -6
+      this.limiter.knee.value = 6
+      this.limiter.ratio.value = 12
+      this.limiter.attack.value = 0.003
+      this.limiter.release.value = 0.25
+      this.masterGain.connect(this.limiter)
+      this.limiter.connect(this.ctx.destination)
       this.blocked = false
     } catch {
       this.blocked = true
@@ -65,7 +75,10 @@ export class AudioManager {
     return this.playing
   }
 
-  private scheduleIteration(ringtone: RingtoneId, startTime: number): number {
+  private scheduleIteration(
+    ringtone: Exclude<RingtoneId, 'random'>,
+    startTime: number,
+  ): number {
     if (!this.ctx || !this.masterGain) return 0
     const pattern = RINGTONE_PATTERNS[ringtone]
     for (const tone of pattern.tones) {
@@ -115,7 +128,10 @@ export class AudioManager {
     this.blocked = false
     this.emit()
 
-    const length = RINGTONE_PATTERNS[ringtone].length
+    // Resolve "random" to a concrete tone once per playback so the ring is
+    // consistent for its whole duration (a fresh surprise next time it fires).
+    const resolved = resolveRingtone(ringtone)
+    const length = RINGTONE_PATTERNS[resolved].length
     const deadline = loop ? Infinity : Date.now() + finiteSeconds * 1000
 
     const startNext = () => {
@@ -124,7 +140,7 @@ export class AudioManager {
         this.stop()
         return
       }
-      this.scheduleIteration(ringtone, this.ctx.currentTime + 0.02)
+      this.scheduleIteration(resolved, this.ctx.currentTime + 0.02)
       this.loopTimer = window.setTimeout(startNext, length * 1000)
     }
     startNext()
@@ -162,10 +178,13 @@ export class AudioManager {
    * the tone, then stops automatically.
    */
   preview(ringtone: RingtoneId, minSeconds = 5): void {
-    const length = RINGTONE_PATTERNS[ringtone].length
+    // Resolve here so a "random" preview commits to one tone and the iteration
+    // math below matches what actually plays.
+    const resolved = resolveRingtone(ringtone)
+    const length = RINGTONE_PATTERNS[resolved].length
     // Round up so we never cut a pattern off mid-way and always reach >= 5s.
     const iterations = Math.max(1, Math.ceil(minSeconds / length))
-    this.play(ringtone, false, iterations * length)
+    this.play(resolved, false, iterations * length)
   }
 
   private stopNodes() {

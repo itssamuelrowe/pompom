@@ -10,6 +10,13 @@ export type RingtoneId =
   | 'soft-marimba'
   | 'classic-alarm'
   | 'zen-gong'
+  | 'crystal-ping'
+  | 'warm-pluck'
+  | 'bubble-pop'
+  | 'rising-arp'
+  | 'wood-block'
+  | 'cosmic-shimmer'
+  | 'random'
 
 export interface Settings {
   pomodoroDuration: number
@@ -22,6 +29,8 @@ export interface Settings {
   themeMode: ThemeMode
   accentColor: string
   volume: number
+  /** Id of the template the user picked on first visit (null until chosen). */
+  templateId: string | null
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -32,9 +41,10 @@ export const DEFAULT_SETTINGS: Settings = {
   ringtone: 'gentle-bell',
   keepRinging: true,
   autoCycle: true,
-  themeMode: 'light',
+  themeMode: 'system',
   accentColor: 'tomato',
   volume: 0.7,
+  templateId: null,
 }
 
 export const DURATION_LIMITS = {

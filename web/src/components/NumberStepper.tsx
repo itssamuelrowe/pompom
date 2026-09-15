@@ -71,7 +71,7 @@ export default function NumberStepper({
           alignItems: 'center',
           border: 1,
           borderColor: 'divider',
-          borderRadius: 2,
+          borderRadius: '8px',
           overflow: 'hidden',
           bgcolor: 'background.default',
         }}
