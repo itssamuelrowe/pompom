@@ -1,0 +1,16 @@
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100svh;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Remove the number input spinners' aggressive styling but keep them usable. */
+input[type='number'] {
+  -moz-appearance: textfield;
+}
