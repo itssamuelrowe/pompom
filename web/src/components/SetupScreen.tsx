@@ -17,7 +17,7 @@ import Logo from './Logo'
 import NumberStepper from './NumberStepper'
 import TemplateCard from './TemplateCard'
 import { TEMPLATES, type Template } from '../templates'
-import { DEFAULT_SETTINGS, DURATION_LIMITS } from '../types'
+import { DEFAULT_SETTINGS, DURATION_LIMITS } from '../defaults'
 
 const ISLAND_WEBP = `${import.meta.env.BASE_URL}low-poly-mountain-trail-island.webp`
 const ISLAND_PNG = `${import.meta.env.BASE_URL}low-poly-mountain-trail-island.png`

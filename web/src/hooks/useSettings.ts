@@ -2,6 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   DEFAULT_SETTINGS,
   DURATION_LIMITS,
+  IDLE_REMINDER_MESSAGE_MAX,
+  REMINDER_INTERVAL_LIMITS,
+} from '../defaults'
+import {
   type Settings,
   type ThemeMode,
   type RingtoneId,
@@ -80,6 +84,37 @@ function sanitize(raw: unknown): Settings {
       typeof r.autoCycle === 'boolean'
         ? r.autoCycle
         : DEFAULT_SETTINGS.autoCycle,
+    autoStartNext:
+      typeof r.autoStartNext === 'boolean'
+        ? r.autoStartNext
+        : DEFAULT_SETTINGS.autoStartNext,
+    idleReminderEnabled:
+      typeof r.idleReminderEnabled === 'boolean'
+        ? r.idleReminderEnabled
+        : DEFAULT_SETTINGS.idleReminderEnabled,
+    idleReminderInterval: clampInt(
+      r.idleReminderInterval,
+      REMINDER_INTERVAL_LIMITS.min,
+      REMINDER_INTERVAL_LIMITS.max,
+      DEFAULT_SETTINGS.idleReminderInterval,
+    ),
+    idleReminderMessage:
+      typeof r.idleReminderMessage === 'string' &&
+      r.idleReminderMessage.trim().length > 0
+        ? r.idleReminderMessage.slice(0, IDLE_REMINDER_MESSAGE_MAX)
+        : DEFAULT_SETTINGS.idleReminderMessage,
+    idleReminderFunny:
+      typeof r.idleReminderFunny === 'boolean'
+        ? r.idleReminderFunny
+        : DEFAULT_SETTINGS.idleReminderFunny,
+    remindOnSessionEnd:
+      typeof r.remindOnSessionEnd === 'boolean'
+        ? r.remindOnSessionEnd
+        : DEFAULT_SETTINGS.remindOnSessionEnd,
+    idleSoundEnabled:
+      typeof r.idleSoundEnabled === 'boolean'
+        ? r.idleSoundEnabled
+        : DEFAULT_SETTINGS.idleSoundEnabled,
     themeMode,
     accentColor: validAccent,
     volume:

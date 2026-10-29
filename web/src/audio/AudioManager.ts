@@ -173,6 +173,37 @@ export class AudioManager {
   }
 
   /**
+   * A gentle "two-beat" nudge used to remind the user the timer is idle. Two
+   * short notes, distinct from both the looping ring and the UI click. Safe to
+   * call repeatedly; it never loops on its own.
+   */
+  idleChime(): void {
+    this.init()
+    if (!this.ctx || !this.masterGain) return
+    void this.ctx.resume().catch(() => undefined)
+    const now = this.ctx.currentTime
+    // Two soft beats a perfect-fourth apart with a brief gap between them.
+    const beats = [
+      { at: 0, freq: 587.33 }, // D5
+      { at: 0.18, freq: 783.99 }, // G5
+    ]
+    for (const b of beats) {
+      const osc = this.ctx.createOscillator()
+      const gain = this.ctx.createGain()
+      const t0 = now + b.at
+      osc.type = 'sine'
+      osc.frequency.setValueAtTime(b.freq, t0)
+      gain.gain.setValueAtTime(0.0001, t0)
+      gain.gain.linearRampToValueAtTime(0.5, t0 + 0.012)
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14)
+      osc.connect(gain)
+      gain.connect(this.masterGain)
+      osc.start(t0)
+      osc.stop(t0 + 0.18)
+    }
+  }
+
+  /**
    * Preview a ringtone. Loops the pattern for at least 5 seconds (rounding up
    * to a whole number of iterations) so the user hears the full character of
    * the tone, then stops automatically.

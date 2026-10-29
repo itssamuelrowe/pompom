@@ -11,6 +11,7 @@ import {
   IconButton,
   Stack,
   Tooltip,
+  useMediaQuery,
   useTheme,
   alpha,
 } from '@mui/material'
@@ -22,13 +23,16 @@ import VolumeUpRoundedIcon from '@mui/icons-material/VolumeUpRounded'
 import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded'
 import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded'
 import SettingsBrightnessRoundedIcon from '@mui/icons-material/SettingsBrightnessRounded'
-import { useState } from 'react'
+import NotificationsActiveRoundedIcon from '@mui/icons-material/NotificationsActiveRounded'
+import NotificationsOffRoundedIcon from '@mui/icons-material/NotificationsOffRounded'
+import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded'
+import { useEffect, useRef, useState } from 'react'
 import {
   DURATION_LIMITS,
-  type Settings,
-  type ThemeMode,
-  type RingtoneId,
-} from '../types'
+  IDLE_REMINDER_MESSAGE_MAX,
+  REMINDER_INTERVAL_LIMITS,
+} from '../defaults'
+import { type Settings, type ThemeMode, type RingtoneId } from '../types'
 import TuneRoundedIcon from '@mui/icons-material/TuneRounded'
 import { RINGTONES } from '../audio/ringtones'
 import { getAccentColor } from '../theme/palette'
@@ -56,11 +60,24 @@ interface SettingsPanelProps {
   onPreview: (ringtone: RingtoneId) => void
   onStopPreview: () => void
   isPreviewing: boolean
+  /** Current browser notification permission state. */
+  notificationPermission: 'default' | 'granted' | 'denied' | 'unsupported'
+  /** Ask the browser for notification permission (user gesture). */
+  onRequestNotificationPermission: () => void
+  /** Play the two-beat idle sound once (also unlocks audio). */
+  onPreviewIdleSound: () => void
 }
 
-function SectionLabel({ children }: { children: React.ReactNode }) {
+function SectionLabel({
+  children,
+  id,
+}: {
+  children: React.ReactNode
+  id?: string
+}) {
   return (
     <Typography
+      id={id}
       variant="overline"
       sx={{
         color: 'text.secondary',
@@ -68,6 +85,8 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
         letterSpacing: 1,
         display: 'block',
         mb: 1,
+        // Offset so the sticky header doesn't cover the target on scroll.
+        scrollMarginTop: 80,
       }}
     >
       {children}
@@ -166,6 +185,201 @@ function OptionRow({
   )
 }
 
+interface NotificationPermissionStatusProps {
+  permission: 'default' | 'granted' | 'denied' | 'unsupported'
+  onRequest: () => void
+}
+
+/**
+ * Shows the current browser notification permission and, when it isn't granted,
+ * a clear way to request it (or guidance when it's been blocked/unsupported).
+ */
+function NotificationPermissionStatus({
+  permission,
+  onRequest,
+}: NotificationPermissionStatusProps) {
+  const theme = useTheme()
+
+  const config = {
+    granted: {
+      color: theme.palette.success.main,
+      icon: <NotificationsActiveRoundedIcon fontSize="small" />,
+      title: 'Notifications enabled',
+      detail: "You'll get reminders while this tab is open.",
+    },
+    default: {
+      color: theme.palette.warning.main,
+      icon: <ErrorOutlineRoundedIcon fontSize="small" />,
+      title: 'Permission needed',
+      detail: 'Allow notifications so reminders can show up.',
+    },
+    denied: {
+      color: theme.palette.error.main,
+      icon: <NotificationsOffRoundedIcon fontSize="small" />,
+      title: 'Notifications blocked',
+      detail:
+        "Your browser is blocking them. Allow notifications for this site in the address-bar / site settings, then try again.",
+    },
+    unsupported: {
+      color: theme.palette.error.main,
+      icon: <NotificationsOffRoundedIcon fontSize="small" />,
+      title: 'Not supported',
+      detail: "This browser doesn't support notifications.",
+    },
+  }[permission]
+
+  return (
+    <Box
+      sx={{
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 1.25,
+        p: 1.25,
+        borderRadius: OPTION_RADIUS,
+        border: 1,
+        borderColor: alpha(config.color, 0.4),
+        bgcolor: alpha(config.color, 0.06),
+      }}
+    >
+      <Box sx={{ color: config.color, display: 'flex', mt: 0.1 }}>
+        {config.icon}
+      </Box>
+      <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+        <Typography variant="body2" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+          {config.title}
+        </Typography>
+        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+          {config.detail}
+        </Typography>
+      </Box>
+      {(permission === 'default' || permission === 'denied') && (
+        <Button
+          variant="outlined"
+          color="inherit"
+          size="small"
+          onClick={onRequest}
+          sx={{
+            flexShrink: 0,
+            color: 'text.primary',
+            borderColor: 'divider',
+            borderRadius: OPTION_RADIUS,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {permission === 'denied' ? 'Try again' : 'Allow'}
+        </Button>
+      )}
+    </Box>
+  )
+}
+
+const SETTINGS_SECTIONS = [
+  { id: 'settings-format', label: 'Format' },
+  { id: 'settings-sound', label: 'Sound' },
+  { id: 'settings-behavior', label: 'Behavior' },
+  { id: 'settings-reminders', label: 'Reminders' },
+  { id: 'settings-appearance', label: 'Appearance' },
+  { id: 'settings-data', label: 'Data' },
+] as const
+
+interface SettingsQuickNavProps {
+  /** The scrollable content container the section anchors live in. */
+  scrollRef: React.RefObject<HTMLDivElement | null>
+}
+
+/**
+ * A sticky vertical rail (desktop only) that jumps to each settings section
+ * and highlights the one currently in view.
+ */
+function SettingsQuickNav({ scrollRef }: SettingsQuickNavProps) {
+  const theme = useTheme()
+  const [active, setActive] = useState<string>(SETTINGS_SECTIONS[0].id)
+
+  useEffect(() => {
+    const root = scrollRef.current
+    if (!root) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        // Pick the top-most section currently intersecting the viewport.
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+        if (visible[0]?.target.id) setActive(visible[0].target.id)
+      },
+      { root, rootMargin: '-65px 0px -70% 0px', threshold: 0 },
+    )
+    for (const s of SETTINGS_SECTIONS) {
+      const el = root.querySelector(`#${s.id}`)
+      if (el) observer.observe(el)
+    }
+    return () => observer.disconnect()
+  }, [scrollRef])
+
+  const go = (id: string) => {
+    const root = scrollRef.current
+    const el = root?.querySelector<HTMLElement>(`#${id}`)
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    setActive(id)
+  }
+
+  return (
+    <Box
+      component="nav"
+      aria-label="Settings sections"
+      sx={{
+        flexShrink: 0,
+        width: 150,
+        borderLeft: 1,
+        borderColor: 'divider',
+        position: 'sticky',
+        top: 65,
+        alignSelf: 'flex-start',
+        pt: 3,
+        pb: 3,
+        pl: 1.5,
+        pr: 2,
+      }}
+    >
+      <Stack spacing={0.25}>
+        {SETTINGS_SECTIONS.map((s) => {
+          const isActive = active === s.id
+          return (
+            <Box
+              key={s.id}
+              component="button"
+              onClick={() => go(s.id)}
+              aria-current={isActive ? 'true' : undefined}
+              sx={{
+                appearance: 'none',
+                border: 0,
+                cursor: 'pointer',
+                textAlign: 'left',
+                font: 'inherit',
+                borderRadius: '8px',
+                px: 1.25,
+                py: 0.75,
+                fontSize: 14,
+                fontWeight: isActive ? 700 : 500,
+                color: isActive ? 'primary.main' : 'text.secondary',
+                bgcolor: isActive
+                  ? alpha(theme.palette.primary.main, 0.1)
+                  : 'transparent',
+                transition: 'background-color 0.15s, color 0.15s',
+                '&:hover': {
+                  bgcolor: alpha(theme.palette.primary.main, 0.06),
+                  color: 'text.primary',
+                },
+              }}
+            >
+              {s.label}
+            </Box>
+          )
+        })}
+      </Stack>
+    </Box>
+  )
+}
+
 export default function SettingsPanel({
   settings,
   onUpdate,
@@ -176,8 +390,13 @@ export default function SettingsPanel({
   onPreview,
   onStopPreview,
   isPreviewing,
+  notificationPermission,
+  onRequestNotificationPermission,
+  onPreviewIdleSound,
 }: SettingsPanelProps) {
   const theme = useTheme()
+  const isDesktop = useMediaQuery(theme.breakpoints.up('md'))
+  const scrollRef = useRef<HTMLDivElement>(null)
   const [colorPickerOpen, setColorPickerOpen] = useState(false)
   const accent = getAccentColor(settings.accentColor)
   const swatch = theme.palette.mode === 'dark' ? accent.darkMain : accent.main
@@ -190,20 +409,27 @@ export default function SettingsPanel({
     settings.templateId === CUSTOM_TEMPLATE_ID || !activeTemplate
 
   return (
+    // The whole panel is one scroll container, so the scrollbar sits on the
+    // drawer's right edge. Content and the sticky quick-nav share this scroll
+    // context; the nav just pins itself with position: sticky.
     <Box
-      sx={{
-        height: '100%',
-        overflowY: 'auto',
-        px: { xs: 3, sm: 4 },
-        py: { xs: 3, sm: 3.5 },
-      }}
+      ref={scrollRef}
+      sx={{ height: '100%', overflowY: 'auto' }}
     >
+      {/* Sticky header spans the full panel width and pins to the top. */}
       <Box
         sx={{
+          position: 'sticky',
+          top: 0,
+          zIndex: 2,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          mb: 3,
+          px: { xs: 3, sm: 4 },
+          py: 2,
+          bgcolor: 'background.paper',
+          borderBottom: 1,
+          borderColor: 'divider',
         }}
       >
         <Typography variant="h5">Settings</Typography>
@@ -212,8 +438,17 @@ export default function SettingsPanel({
         </IconButton>
       </Box>
 
+      <Box sx={{ display: 'flex', alignItems: 'flex-start' }}>
+        <Box
+          sx={{
+            flex: 1,
+            minWidth: 0,
+            px: { xs: 3, sm: 4 },
+            py: { xs: 3, sm: 3.5 },
+          }}
+        >
       {/* Format templates — same rich cards as the first-run setup screen. */}
-      <SectionLabel>Format</SectionLabel>
+      <SectionLabel id="settings-format">Format</SectionLabel>
       <Stack spacing={1} sx={{ mb: isCustom ? 2 : 3 }}>
         {TEMPLATES.map((t) => {
           const active = !isCustom && activeTemplate?.id === t.id
@@ -286,7 +521,7 @@ export default function SettingsPanel({
       <Divider sx={{ my: 3 }} />
 
       {/* Sound */}
-      <SectionLabel>Sound</SectionLabel>
+      <SectionLabel id="settings-sound">Sound</SectionLabel>
       <Stack spacing={2} sx={{ mb: 3 }}>
         <TextField
           select
@@ -351,7 +586,7 @@ export default function SettingsPanel({
       <Divider sx={{ my: 3 }} />
 
       {/* Behavior */}
-      <SectionLabel>Behavior</SectionLabel>
+      <SectionLabel id="settings-behavior">Behavior</SectionLabel>
       <Box sx={{ mb: 1 }}>
         <FormControlLabel
           control={
@@ -369,10 +604,175 @@ export default function SettingsPanel({
         </Typography>
       </Box>
 
+      <Box sx={{ mb: 1 }}>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={settings.autoStartNext}
+              onChange={(e) => onUpdate('autoStartNext', e.target.checked)}
+            />
+          }
+          label="Auto-start next timer"
+          sx={{ justifyContent: 'space-between', ml: 0, '.MuiFormControlLabel-label': { color: 'text.secondary' } }}
+          labelPlacement="start"
+        />
+        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+          Start the next session automatically when one finishes, without
+          clicking any buttons.
+        </Typography>
+      </Box>
+
+      <Divider sx={{ my: 3 }} />
+
+      {/* Reminders — notify the user while the timer is idle. */}
+      <SectionLabel id="settings-reminders">Reminders</SectionLabel>
+      <Box sx={{ mb: 1 }}>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={settings.idleReminderEnabled}
+              onChange={(e) => {
+                const on = e.target.checked
+                onUpdate('idleReminderEnabled', on)
+                // Turning the reminder on is a user gesture -> good moment to
+                // ask for notification permission if we don't have it yet.
+                if (on && notificationPermission === 'default') {
+                  onRequestNotificationPermission()
+                }
+              }}
+              disabled={notificationPermission === 'unsupported'}
+            />
+          }
+          label="Idle reminders"
+          sx={{ justifyContent: 'space-between', ml: 0, '.MuiFormControlLabel-label': { color: 'text.secondary' } }}
+          labelPlacement="start"
+        />
+        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+          While PomPom is open and the timer isn't running, send a notification
+          to nudge you back to focus.
+        </Typography>
+      </Box>
+
+      {settings.idleReminderEnabled && (
+        <Stack spacing={2} sx={{ mb: 1, mt: 1.5 }}>
+          <NotificationPermissionStatus
+            permission={notificationPermission}
+            onRequest={onRequestNotificationPermission}
+          />
+
+          <Box>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={settings.idleReminderFunny}
+                  onChange={(e) => onUpdate('idleReminderFunny', e.target.checked)}
+                />
+              }
+              label="Funny random messages"
+              sx={{ justifyContent: 'space-between', ml: 0, width: '100%', '.MuiFormControlLabel-label': { color: 'text.secondary' } }}
+              labelPlacement="start"
+            />
+            {settings.idleReminderFunny ? (
+              <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+                Each reminder picks a random quip from a pack of 100. For
+                example: "This little maneuver is going to cost us 5 minutes."
+              </Typography>
+            ) : (
+              <TextField
+                label="Reminder message"
+                size="small"
+                value={settings.idleReminderMessage}
+                onChange={(e) =>
+                  onUpdate(
+                    'idleReminderMessage',
+                    e.target.value.slice(0, IDLE_REMINDER_MESSAGE_MAX),
+                  )
+                }
+                fullWidth
+                multiline
+                minRows={2}
+                slotProps={{ htmlInput: { maxLength: IDLE_REMINDER_MESSAGE_MAX } }}
+                helperText={`${settings.idleReminderMessage.length}/${IDLE_REMINDER_MESSAGE_MAX}`}
+                sx={{ mt: 1, '& .MuiOutlinedInput-root': { borderRadius: OPTION_RADIUS } }}
+              />
+            )}
+          </Box>
+
+          <Box>
+            <FormControlLabel
+              control={
+                <Switch
+                  checked={settings.remindOnSessionEnd}
+                  onChange={(e) => onUpdate('remindOnSessionEnd', e.target.checked)}
+                />
+              }
+              label="Also remind when a session ends"
+              sx={{ justifyContent: 'space-between', ml: 0, width: '100%', '.MuiFormControlLabel-label': { color: 'text.secondary' } }}
+              labelPlacement="start"
+            />
+            <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+              Send a notification the moment a pomodoro or break finishes, not
+              just on the idle interval.
+            </Typography>
+          </Box>
+        </Stack>
+      )}
+
+      <Box sx={{ mt: 2, mb: 1 }}>
+        <FormControlLabel
+          control={
+            <Switch
+              checked={settings.idleSoundEnabled}
+              onChange={(e) => onUpdate('idleSoundEnabled', e.target.checked)}
+            />
+          }
+          label="Idle sound"
+          sx={{ justifyContent: 'space-between', ml: 0, '.MuiFormControlLabel-label': { color: 'text.secondary' } }}
+          labelPlacement="start"
+        />
+        <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.5 }}>
+          Play a short two-beat chime on a loop while the timer is idle. Unlike
+          the ringtone, it doesn't ring continuously.
+        </Typography>
+      </Box>
+
+      {settings.idleSoundEnabled && (
+        <Stack spacing={2} sx={{ mb: 1, mt: 1.5 }}>
+          <Button
+            variant="outlined"
+            color="inherit"
+            size="small"
+            startIcon={<PlayArrowRoundedIcon />}
+            onClick={onPreviewIdleSound}
+            sx={{ alignSelf: 'flex-start', color: 'text.secondary', borderColor: 'divider', borderRadius: OPTION_RADIUS }}
+          >
+            Preview sound
+          </Button>
+        </Stack>
+      )}
+
+      {/* Shared cadence: a single interval drives both the notification and the
+          idle sound, since both exist to pull you back into the cycle. */}
+      {(settings.idleReminderEnabled || settings.idleSoundEnabled) && (
+        <Box sx={{ mt: 2 }}>
+          <NumberStepper
+            label="Remind me every"
+            value={settings.idleReminderInterval}
+            min={REMINDER_INTERVAL_LIMITS.min}
+            max={REMINDER_INTERVAL_LIMITS.max}
+            suffix="min"
+            onChange={(v) => onUpdate('idleReminderInterval', v)}
+          />
+          <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block', mt: 0.75 }}>
+            Applies to both the notification and the idle sound.
+          </Typography>
+        </Box>
+      )}
+
       <Divider sx={{ my: 3 }} />
 
       {/* Appearance */}
-      <SectionLabel>Appearance</SectionLabel>
+      <SectionLabel id="settings-appearance">Appearance</SectionLabel>
       <Stack spacing={2} sx={{ mb: 3 }}>
         <TextField
           select
@@ -436,7 +836,7 @@ export default function SettingsPanel({
       <Divider sx={{ my: 3 }} />
 
       {/* Data */}
-      <SectionLabel>Data</SectionLabel>
+      <SectionLabel id="settings-data">Data</SectionLabel>
       <Box sx={{ mb: 1 }}>
         <Button
           variant="outlined"
@@ -448,12 +848,16 @@ export default function SettingsPanel({
         </Button>
       </Box>
 
-      <AccentColorPicker
-        open={colorPickerOpen}
-        value={settings.accentColor}
-        onClose={() => setColorPickerOpen(false)}
-        onApply={(id) => onUpdate('accentColor', id)}
-      />
+          <AccentColorPicker
+            open={colorPickerOpen}
+            value={settings.accentColor}
+            onClose={() => setColorPickerOpen(false)}
+            onApply={(id) => onUpdate('accentColor', id)}
+          />
+        </Box>
+
+        {isDesktop && <SettingsQuickNav scrollRef={scrollRef} />}
+      </Box>
     </Box>
   )
 }
