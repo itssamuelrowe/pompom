@@ -2,12 +2,15 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo",
     "target": "es2023",
-    "lib": ["ES2023"],
+    "lib": ["ES2023", "DOM"],
     "types": ["node"],
     "skipLibCheck": true,
+    "jsx": "react-jsx",
 
-    /* Bundler mode */
-    "module": "nodenext",
+    /* Bundler mode (these files are loaded through Vite/esbuild, which
+       resolves extensionless and .tsx imports). */
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "moduleDetection": "force",
@@ -19,5 +22,5 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["vite.config.ts"]
+  "include": ["vite.config.ts", "scripts", "src/docs"]
 }

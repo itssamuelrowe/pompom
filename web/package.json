@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && npm run build:docs",
+    "build:docs": "node scripts/run-prerender.mjs",
     "lint": "eslint .",
     "preview": "vite preview"
   },
@@ -16,8 +17,23 @@
     "@fontsource/space-grotesk": "^5.3.0",
     "@mui/icons-material": "^9.4.0",
     "@mui/material": "^9.4.0",
+    "@visx/axis": "^4.0.0",
+    "@visx/curve": "^4.0.0",
+    "@visx/event": "^4.0.0",
+    "@visx/gradient": "^4.0.0",
+    "@visx/grid": "^4.0.0",
+    "@visx/group": "^4.0.0",
+    "@visx/responsive": "^4.0.0",
+    "@visx/scale": "^4.0.0",
+    "@visx/shape": "^4.0.0",
+    "@visx/text": "^4.0.0",
+    "@visx/tooltip": "^4.0.0",
+    "gray-matter": "^4.0.3",
+    "html-to-image": "^1.11.13",
+    "marked": "^18.1.2",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8"
+    "react-dom": "^19.2.8",
+    "react-router-dom": "^7.18.5"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
